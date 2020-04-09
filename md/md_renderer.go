@@ -75,7 +75,7 @@ func (r *Renderer) heading(w io.Writer, node *ast.Heading, entering bool) {
 		r.outs(w, " ")
 		//}
 	} else {
-		r.outs(w, "\n")
+		r.outs(w, "\n\n")
 		/*
 			l = 10
 			switch level {

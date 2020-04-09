@@ -92,11 +92,7 @@ func (t tasks) ByHeader(s string) []ast.Node {
 						inLevel = -1
 					}
 				}
-				if strings.Contains(string(h.Content), s) {
-					inLevel = h.Level
-					//tasks = append(tasks, node.GetChildren()...)
-				}
-				fmt.Printf("Heading children: %d, %d\n", len(h.Children), len(node.GetChildren()))
+				//fmt.Printf("Heading children: %d, %d\n", len(h.Children), len(node.GetChildren()))
 			}
 		case *ast.Text:
 			//fmt.Printf("literal: %v, leaf: %#v\n", string(node.AsLeaf().Literal), node.AsLeaf())
@@ -226,20 +222,23 @@ func archiveToday() error {
 	return nil
 }
 
-func newToday(current tasks, recurring tasks) error {
+func newToday(current tasks, recurring tasks, old tasks) error {
 	f, err := getTodayFilename()
 	if err != nil {
 		return err
 	}
+	headingNode(current.node, 2, "Inbox")
+
+	headingNode(current.node, 2, "Rolled Over")
+
+	headingNode(current.node, 2, "Daily")
 	// get recurring events
 	t := recurring.ByHeader("Daily")
 	fmt.Printf("Daily: %d nodes\n", len(t))
-	ch := current.node.GetChildren()
 	for _, ti := range t {
 		ti.SetParent(current.node)
 	}
-	ch = append(ch, t...)
-	current.node.SetChildren(ch)
+	current.node.SetChildren(append(current.node.GetChildren(), t...))
 	return newFile(f, current)
 }
 
@@ -275,11 +274,12 @@ func headingNode(parent ast.Node, level int, text string) ast.Node {
 	h := &ast.Heading{Level: level, Container: ast.Container{Parent: parent}}
 	textNode := &ast.Text{
 		Leaf: ast.Leaf{
-			Content: []byte(text),
-			Literal: []byte(text),
+			Content: []byte(text + "\n"),
+			Literal: []byte(text + "\n"),
 		},
 	}
 	h.SetChildren([]ast.Node{textNode})
+	parent.SetChildren(append(parent.GetChildren(), h))
 	return h
 }
 
@@ -292,8 +292,13 @@ func rollover(args []string) error {
 	if err := archiveToday(); err != nil {
 		return err
 	}
+
+	// new today
+	today := tasks{node: &ast.Document{}}
+	todayNode(today.node)
+
 	// load today
-	today, err := loadToday()
+	old, err := loadToday()
 	if err != nil {
 		return err
 	}
@@ -302,7 +307,7 @@ func rollover(args []string) error {
 	if err != nil {
 		return err
 	}
-	return newToday(today, recurring)
+	return newToday(today, recurring, old)
 }
 
 const (
@@ -325,13 +330,11 @@ func initialise(args []string) error {
 	}
 
 	today := tasks{node: &ast.Document{}}
-	children := today.node.GetChildren()
-	children = append(children, todayNode(today.node))
-	today.node.SetChildren(children)
+	todayNode(today.node)
 
 	recurring := tasks{node: &ast.Document{}}
 	if !recurringExists || forceNewRecurring {
-		children = recurring.node.GetChildren()
+		children := recurring.node.GetChildren()
 		children = append(children, headingNode(recurring.node, 1, "Recurring tasks"))
 		children = append(children, headingNode(recurring.node, 2, "Daily"))
 		children = append(children, headingNode(recurring.node, 2, "Weekly"))
@@ -349,7 +352,7 @@ func initialise(args []string) error {
 	}
 
 	if _, err := os.Stat(tf); os.IsNotExist(err) || force {
-		err = newToday(today, recurring)
+		err = newToday(today, recurring, tasks{node: &ast.Document{}}) // nothing rolled over
 		if err != nil {
 			return err
 		}
