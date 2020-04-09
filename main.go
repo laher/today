@@ -77,6 +77,13 @@ func (t tasks) ByHeader(s string) []ast.Node {
 	inLevel := -1
 	f := func(node ast.Node, entering bool) ast.WalkStatus {
 		switch h := node.(type) {
+		case *ast.Document: // ignore
+		case *ast.List:
+			if entering {
+				if inLevel > -1 {
+					tasks = append(tasks, node)
+				}
+			}
 		case *ast.Heading:
 			if entering {
 				fmt.Printf("Heading, l %d: '%s'\n", h.Level, h.Content)
@@ -92,7 +99,7 @@ func (t tasks) ByHeader(s string) []ast.Node {
 				fmt.Printf("Heading children: %d, %d\n", len(h.Children), len(node.GetChildren()))
 			}
 		case *ast.Text:
-			fmt.Printf("literal: %v, leaf: %#v\n", string(node.AsLeaf().Literal), node.AsLeaf())
+			//fmt.Printf("literal: %v, leaf: %#v\n", string(node.AsLeaf().Literal), node.AsLeaf())
 			if p, ok := h.Parent.(*ast.Heading); ok {
 				if strings.Contains(string(h.Literal), s) {
 					inLevel = p.Level
@@ -100,10 +107,10 @@ func (t tasks) ByHeader(s string) []ast.Node {
 				}
 			}
 		case *ast.ListItem:
-			fmt.Printf("List item: %v, inLevel: %v, container: %#v\n", string(node.AsContainer().Content), inLevel, node.AsContainer())
 			if entering {
 				if inLevel > -1 {
-					tasks = append(tasks, node)
+					fmt.Printf("Including List item: %v, inLevel: %v, container: %#v\n", string(node.AsContainer().Content), inLevel, node.AsContainer())
+					//		tasks = append(tasks, node)
 				}
 			}
 		default:
@@ -113,7 +120,7 @@ func (t tasks) ByHeader(s string) []ast.Node {
 		}
 		if inLevel > -1 {
 			if node.AsContainer() != nil {
-				fmt.Printf("inLevel %d, type: %T, content: %s\n", inLevel, node, node.AsContainer().Content)
+				//				fmt.Printf("inLevel %d, type: %T, content: %s\n", inLevel, node, node.AsContainer().Content)
 			}
 		}
 		return ast.GoToNext
@@ -172,9 +179,8 @@ func parseFile(file string) (tasks, error) {
 
 func parse(b []byte) (tasks, error) {
 
-	//extensions := parser.CommonExtensions | parser.AutoHeadingIDs
-	//p := parser.NewWithExtensions(extensions)
-	p := parser.New()
+	extensions := parser.CommonExtensions | parser.AutoHeadingIDs
+	p := parser.NewWithExtensions(extensions)
 	node := p.Parse(b)
 	return tasks{node: node}, nil
 }
@@ -225,6 +231,7 @@ func newToday(current tasks, recurring tasks) error {
 	if err != nil {
 		return err
 	}
+	// get recurring events
 	t := recurring.ByHeader("Daily")
 	fmt.Printf("Daily: %d nodes\n", len(t))
 	ch := current.node.GetChildren()
@@ -266,8 +273,13 @@ func newFile(f string, t tasks) error {
 
 func headingNode(parent ast.Node, level int, text string) ast.Node {
 	h := &ast.Heading{Level: level, Container: ast.Container{Parent: parent}}
-	h.Container.Content = []byte(text)
-	h.Container.Literal = []byte(text)
+	textNode := &ast.Text{
+		Leaf: ast.Leaf{
+			Content: []byte(text),
+			Literal: []byte(text),
+		},
+	}
+	h.SetChildren([]ast.Node{textNode})
 	return h
 }
 
@@ -293,6 +305,11 @@ func rollover(args []string) error {
 	return newToday(today, recurring)
 }
 
+const (
+	force             = true
+	forceNewRecurring = false
+)
+
 func initialise(args []string) error {
 	tf, err := getTodayFilename()
 	if err != nil {
@@ -313,9 +330,7 @@ func initialise(args []string) error {
 	today.node.SetChildren(children)
 
 	recurring := tasks{node: &ast.Document{}}
-	if !recurringExists {
-		fmt.Println("recurring not exist")
-		// TODO add tasks
+	if !recurringExists || forceNewRecurring {
 		children = recurring.node.GetChildren()
 		children = append(children, headingNode(recurring.node, 1, "Recurring tasks"))
 		children = append(children, headingNode(recurring.node, 2, "Daily"))
@@ -327,18 +342,18 @@ func initialise(args []string) error {
 			return err
 		}
 	} else {
-		fmt.Println("recurring exist")
 		recurring, err = parseFile(rf)
 		if err != nil {
 			return err
 		}
 	}
 
-	if _, err := os.Stat(tf); os.IsNotExist(err) {
+	if _, err := os.Stat(tf); os.IsNotExist(err) || force {
 		err = newToday(today, recurring)
 		if err != nil {
 			return err
 		}
+	} else {
 	}
 
 	return nil

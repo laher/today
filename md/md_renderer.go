@@ -67,23 +67,26 @@ func (r *Renderer) list(w io.Writer, node *ast.List, entering bool) {
 }
 
 func (r *Renderer) heading(w io.Writer, node *ast.Heading, entering bool) {
-	text := node.Literal
 	level := node.Level
 
 	if entering {
-		if level >= 3 {
-			r.outs(w, strings.Repeat("#", level))
-		}
-		r.outs(w, fmt.Sprintf("%s\n", text))
-		l := len(text)
-		switch level {
-		case 1:
-			r.outs(w, strings.Repeat("=", l))
-			r.outs(w, "\n")
-		case 2:
-			r.outs(w, strings.Repeat("-", l))
-			r.outs(w, "\n")
-		}
+		//if level >= 3 {
+		r.outs(w, strings.Repeat("#", level))
+		r.outs(w, " ")
+		//}
+	} else {
+		r.outs(w, "\n")
+		/*
+			l = 10
+			switch level {
+			case 1:
+				r.outs(w, strings.Repeat("=", l))
+				r.outs(w, "\n")
+			case 2:
+				r.outs(w, strings.Repeat("-", l))
+				r.outs(w, "\n")
+			}
+		*/
 	}
 }
 
