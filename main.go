@@ -136,6 +136,26 @@ func loadRecurring() (tasks, error) {
 }
 
 func archiveToday() error {
+	// can be off by a day, occasionally
+	fa, err := getArchiveFilename(time.Now().Add(-time.Hour * 24))
+	if err != nil {
+		return err
+	}
+	ft, err := getTodayFilename()
+	if err != nil {
+		return err
+	}
+	d := filepath.Dir(fa)
+	if err = os.MkdirAll(d, 0755); err != nil {
+		return err
+	}
+	input, err := ioutil.ReadFile(ft)
+	if err != nil {
+		return err
+	}
+	if err = ioutil.WriteFile(fa, input, 0644); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -160,7 +180,7 @@ func newFile(f string, t tasks) error {
 	if err != nil {
 		return err
 	}
-	err = os.MkdirAll(d, 0700)
+	err = os.MkdirAll(d, 0755)
 	if err != nil {
 		return err
 	}
