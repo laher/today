@@ -222,6 +222,10 @@ func archiveToday() error {
 	return nil
 }
 
+func filterDone(nodes []ast.Node) []ast.Node {
+	return nodes
+}
+
 func newToday(current tasks, recurring tasks, old tasks) error {
 	f, err := getTodayFilename()
 	if err != nil {
@@ -230,6 +234,22 @@ func newToday(current tasks, recurring tasks, old tasks) error {
 	headingNode(current.node, 2, "Inbox")
 
 	headingNode(current.node, 2, "Rolled Over")
+
+	i := old.ByHeader("Inbox")
+	fmt.Printf("Old inbox: %d nodes\n", len(i))
+	i = filterDone(i)
+	for _, ti := range i {
+		ti.SetParent(current.node)
+	}
+	current.node.SetChildren(append(current.node.GetChildren(), i...))
+
+	i = old.ByHeader("Rolled Over")
+	fmt.Printf("Old Rolled over: %d nodes\n", len(i))
+	i = filterDone(i)
+	for _, ti := range i {
+		ti.SetParent(current.node)
+	}
+	current.node.SetChildren(append(current.node.GetChildren(), i...))
 
 	headingNode(current.node, 2, "Daily")
 	// get recurring events
