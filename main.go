@@ -3,21 +3,27 @@ package main
 import (
 	"errors"
 	"fmt"
-	"io"
+	"io/ioutil"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/gomarkdown/markdown"
+	"github.com/gomarkdown/markdown/ast"
+	"github.com/gomarkdown/markdown/parser"
+	"github.com/laher/today/md"
 )
 
 func main() {
 	args := os.Args[1:]
-
 	if len(args) < 1 {
 		fmt.Fprintln(os.Stderr, "Please specify a subcommand")
 		os.Exit(1)
 	}
 	var err error
 	switch args[0] {
+	case "init":
+		err = initialise(args)
 	case "rollover":
 		err = rollover(args)
 	case "days":
@@ -57,7 +63,12 @@ const (
 )
 
 type tasks struct {
-	Tasks []task
+	node ast.Node
+}
+
+func (t tasks) Tasks() []task {
+	// TODO use AST
+	return []task{}
 }
 
 func getBaseDir() (string, error) {
@@ -101,16 +112,19 @@ func loadToday() (tasks, error) {
 }
 
 func parseFile(file string) (tasks, error) {
-	f, err := os.Open(file)
+	b, err := ioutil.ReadFile(file)
 	if err != nil {
 		return tasks{}, err
 	}
-	return parse(f)
+	return parse(b)
 }
 
-func parse(r io.Reader) (tasks, error) {
-	// TODO!
-	return tasks{}, nil
+func parse(b []byte) (tasks, error) {
+
+	extensions := parser.CommonExtensions | parser.AutoHeadingIDs
+	parser := parser.NewWithExtensions(extensions)
+	node := parser.Parse(b)
+	return tasks{node: node}, nil
 }
 
 func loadRecurring() (tasks, error) {
@@ -126,7 +140,51 @@ func archiveToday() error {
 }
 
 func newToday(current tasks, recurring tasks) error {
-	return nil
+	f, err := getTodayFilename()
+	if err != nil {
+		return err
+	}
+	return newFile(f, current)
+}
+
+func newRecurring(recurring tasks) error {
+	f, err := getRecurringFilename()
+	if err != nil {
+		return err
+	}
+	return newFile(f, recurring)
+}
+
+func newFile(f string, t tasks) error {
+	d, err := getBaseDir()
+	if err != nil {
+		return err
+	}
+	err = os.MkdirAll(d, 0700)
+	if err != nil {
+		return err
+	}
+	fh, err := os.Create(f)
+	if err != nil {
+		return err
+	}
+	b := markdown.Render(t.node, md.NewRenderer())
+	if _, err := fh.Write(b); err != nil {
+		return err
+	}
+	return fh.Close()
+}
+
+func headingNode(parent ast.Node, level int, text string) ast.Node {
+	h := &ast.Heading{Level: level, Container: ast.Container{Parent: parent}}
+	h.Container.Content = []byte(text)
+	h.Container.Literal = []byte(text)
+	return h
+}
+
+func todayNode(parent ast.Node) ast.Node {
+	t := time.Now()
+	return headingNode(parent, 1, fmt.Sprintf("%s", t.Format("2006-01-02, Mon")))
 }
 
 func rollover(args []string) error {
@@ -144,6 +202,44 @@ func rollover(args []string) error {
 		return err
 	}
 	return newToday(today, recurring)
+}
+
+func initialise(args []string) error {
+	f, err := getTodayFilename()
+	if err != nil {
+		return err
+	}
+
+	today := tasks{node: &ast.Document{}}
+	children := today.node.GetChildren()
+	children = append(children, todayNode(today.node))
+	today.node.SetChildren(children)
+
+	recurring := tasks{node: &ast.Document{}}
+	// TODO add tasks
+	children = recurring.node.GetChildren()
+	children = append(children, headingNode(recurring.node, 1, "Recurring tasks"))
+	children = append(children, headingNode(recurring.node, 2, "Daily"))
+	children = append(children, headingNode(recurring.node, 2, "Weekly"))
+	children = append(children, headingNode(recurring.node, 2, "Weekdays"))
+	recurring.node.SetChildren(children)
+
+	if _, err := os.Stat(f); os.IsNotExist(err) {
+		err = newToday(today, recurring)
+		if err != nil {
+			return err
+		}
+	}
+
+	f, err = getRecurringFilename()
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(f); os.IsNotExist(err) {
+
+		return newRecurring(recurring)
+	}
+	return nil
 }
 
 func days(args []string) error {
