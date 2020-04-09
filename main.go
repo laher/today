@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/gomarkdown/markdown"
@@ -71,6 +72,56 @@ func (t tasks) Tasks() []task {
 	return []task{}
 }
 
+func (t tasks) ByHeader(s string) []ast.Node {
+	tasks := []ast.Node{}
+	inLevel := -1
+	f := func(node ast.Node, entering bool) ast.WalkStatus {
+		switch h := node.(type) {
+		case *ast.Heading:
+			if entering {
+				fmt.Printf("Heading, l %d: '%s'\n", h.Level, h.Content)
+				if inLevel > -1 { // reset
+					if h.Level <= inLevel {
+						inLevel = -1
+					}
+				}
+				if strings.Contains(string(h.Content), s) {
+					inLevel = h.Level
+					//tasks = append(tasks, node.GetChildren()...)
+				}
+				fmt.Printf("Heading children: %d, %d\n", len(h.Children), len(node.GetChildren()))
+			}
+		case *ast.Text:
+			fmt.Printf("literal: %v, leaf: %#v\n", string(node.AsLeaf().Literal), node.AsLeaf())
+			if p, ok := h.Parent.(*ast.Heading); ok {
+				if strings.Contains(string(h.Literal), s) {
+					inLevel = p.Level
+					//tasks = append(tasks, node)
+				}
+			}
+		case *ast.ListItem:
+			fmt.Printf("List item: %v, inLevel: %v, container: %#v\n", string(node.AsContainer().Content), inLevel, node.AsContainer())
+			if entering {
+				if inLevel > -1 {
+					tasks = append(tasks, node)
+				}
+			}
+		default:
+			if entering {
+				fmt.Printf("*** Other Type ***: %T, full: %#v\n", node, node)
+			}
+		}
+		if inLevel > -1 {
+			if node.AsContainer() != nil {
+				fmt.Printf("inLevel %d, type: %T, content: %s\n", inLevel, node, node.AsContainer().Content)
+			}
+		}
+		return ast.GoToNext
+	}
+	ast.Walk(t.node, ast.NodeVisitorFunc(f))
+	return tasks
+}
+
 func getBaseDir() (string, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -121,9 +172,10 @@ func parseFile(file string) (tasks, error) {
 
 func parse(b []byte) (tasks, error) {
 
-	extensions := parser.CommonExtensions | parser.AutoHeadingIDs
-	parser := parser.NewWithExtensions(extensions)
-	node := parser.Parse(b)
+	//extensions := parser.CommonExtensions | parser.AutoHeadingIDs
+	//p := parser.NewWithExtensions(extensions)
+	p := parser.New()
+	node := p.Parse(b)
 	return tasks{node: node}, nil
 }
 
@@ -153,7 +205,16 @@ func archiveToday() error {
 	if err != nil {
 		return err
 	}
-	if err = ioutil.WriteFile(fa, input, 0644); err != nil {
+	// TODO check if file exists. If so, change the name of this one
+	// In the meantime, just append
+	f, err := os.OpenFile(fa, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(input); err != nil {
+		return err
+	}
+	if err := f.Close(); err != nil {
 		return err
 	}
 	return nil
@@ -164,6 +225,14 @@ func newToday(current tasks, recurring tasks) error {
 	if err != nil {
 		return err
 	}
+	t := recurring.ByHeader("Daily")
+	fmt.Printf("Daily: %d nodes\n", len(t))
+	ch := current.node.GetChildren()
+	for _, ti := range t {
+		ti.SetParent(current.node)
+	}
+	ch = append(ch, t...)
+	current.node.SetChildren(ch)
 	return newFile(f, current)
 }
 
@@ -208,6 +277,9 @@ func todayNode(parent ast.Node) ast.Node {
 }
 
 func rollover(args []string) error {
+	if err := archiveToday(); err != nil {
+		return err
+	}
 	// load today
 	today, err := loadToday()
 	if err != nil {
@@ -218,16 +290,21 @@ func rollover(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := archiveToday(); err != nil {
-		return err
-	}
 	return newToday(today, recurring)
 }
 
 func initialise(args []string) error {
-	f, err := getTodayFilename()
+	tf, err := getTodayFilename()
 	if err != nil {
 		return err
+	}
+	rf, err := getRecurringFilename()
+	if err != nil {
+		return err
+	}
+	recurringExists := false
+	if _, err := os.Stat(rf); !os.IsNotExist(err) {
+		recurringExists = true
 	}
 
 	today := tasks{node: &ast.Document{}}
@@ -236,29 +313,34 @@ func initialise(args []string) error {
 	today.node.SetChildren(children)
 
 	recurring := tasks{node: &ast.Document{}}
-	// TODO add tasks
-	children = recurring.node.GetChildren()
-	children = append(children, headingNode(recurring.node, 1, "Recurring tasks"))
-	children = append(children, headingNode(recurring.node, 2, "Daily"))
-	children = append(children, headingNode(recurring.node, 2, "Weekly"))
-	children = append(children, headingNode(recurring.node, 2, "Weekdays"))
-	recurring.node.SetChildren(children)
+	if !recurringExists {
+		fmt.Println("recurring not exist")
+		// TODO add tasks
+		children = recurring.node.GetChildren()
+		children = append(children, headingNode(recurring.node, 1, "Recurring tasks"))
+		children = append(children, headingNode(recurring.node, 2, "Daily"))
+		children = append(children, headingNode(recurring.node, 2, "Weekly"))
+		children = append(children, headingNode(recurring.node, 2, "Weekdays"))
+		recurring.node.SetChildren(children)
+		err := newRecurring(recurring)
+		if err != nil {
+			return err
+		}
+	} else {
+		fmt.Println("recurring exist")
+		recurring, err = parseFile(rf)
+		if err != nil {
+			return err
+		}
+	}
 
-	if _, err := os.Stat(f); os.IsNotExist(err) {
+	if _, err := os.Stat(tf); os.IsNotExist(err) {
 		err = newToday(today, recurring)
 		if err != nil {
 			return err
 		}
 	}
 
-	f, err = getRecurringFilename()
-	if err != nil {
-		return err
-	}
-	if _, err := os.Stat(f); os.IsNotExist(err) {
-
-		return newRecurring(recurring)
-	}
 	return nil
 }
 
