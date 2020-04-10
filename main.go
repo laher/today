@@ -11,7 +11,6 @@ import (
 
 	"github.com/gomarkdown/markdown"
 	"github.com/gomarkdown/markdown/ast"
-	"github.com/gomarkdown/markdown/parser"
 	"github.com/laher/today/md"
 )
 
@@ -38,147 +37,12 @@ func main() {
 	}
 }
 
-type task struct {
-	Description string
-	Status      string
-	Tags        []string
-	Created     time.Time
-	Updated     time.Time
-	Completed   time.Time
-
-	Subtasks []tasks
-
-	RecurType recurType
-	From      time.Time
-	Until     time.Time
-}
-
-type recurType string
-
-const (
-	custom   recurType = "custom"
-	hourly   recurType = "hourly"
-	daily    recurType = "daily"
-	weekly   recurType = "weekly"
-	weekdays recurType = "weekdays"
-)
-
-type tasks struct {
-	node ast.Node
-}
-
-func (t tasks) Tasks() []task {
-	// TODO use AST
-	return []task{}
-}
-
-func (t tasks) ByHeader(s string) []ast.Node {
-	tasks := []ast.Node{}
-	inLevel := -1
-	f := func(node ast.Node, entering bool) ast.WalkStatus {
-		switch h := node.(type) {
-		case *ast.Document: // ignore
-		case *ast.List:
-			if entering {
-				if inLevel > -1 {
-					tasks = append(tasks, node)
-				}
-			}
-		case *ast.Heading:
-			if entering {
-				fmt.Printf("Heading, l %d: '%s'\n", h.Level, h.Content)
-				if inLevel > -1 { // reset
-					if h.Level <= inLevel {
-						inLevel = -1
-					}
-				}
-				//fmt.Printf("Heading children: %d, %d\n", len(h.Children), len(node.GetChildren()))
-			}
-		case *ast.Text:
-			//fmt.Printf("literal: %v, leaf: %#v\n", string(node.AsLeaf().Literal), node.AsLeaf())
-			if p, ok := h.Parent.(*ast.Heading); ok {
-				if strings.Contains(string(h.Literal), s) {
-					inLevel = p.Level
-					//tasks = append(tasks, node)
-				}
-			}
-		case *ast.ListItem:
-			if entering {
-				if inLevel > -1 {
-					fmt.Printf("Including List item: %v, inLevel: %v, container: %#v\n", string(node.AsContainer().Content), inLevel, node.AsContainer())
-					//		tasks = append(tasks, node)
-				}
-			}
-		default:
-			if entering {
-				fmt.Printf("*** Other Type ***: %T, full: %#v\n", node, node)
-			}
-		}
-		if inLevel > -1 {
-			if node.AsContainer() != nil {
-				//				fmt.Printf("inLevel %d, type: %T, content: %s\n", inLevel, node, node.AsContainer().Content)
-			}
-		}
-		return ast.GoToNext
-	}
-	ast.Walk(t.node, ast.NodeVisitorFunc(f))
-	return tasks
-}
-
-func getBaseDir() (string, error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(homeDir, "today"), nil
-}
-
-func getTodayFilename() (string, error) {
-	base, err := getBaseDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(base, "today.md"), nil
-}
-
-func getRecurringFilename() (string, error) {
-	base, err := getBaseDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(base, "recurring.today.md"), nil
-}
-
-func getArchiveFilename(forTime time.Time) (string, error) {
-	base, err := getBaseDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(base, forTime.Format(filepath.Join("2006", "01", "02"))+".today.md"), nil
-}
-
 func loadToday() (tasks, error) {
 	file, err := getTodayFilename()
 	if err != nil {
 		return tasks{}, err
 	}
 	return parseFile(file)
-}
-
-func parseFile(file string) (tasks, error) {
-	b, err := ioutil.ReadFile(file)
-	if err != nil {
-		return tasks{}, err
-	}
-	return parse(b)
-}
-
-func parse(b []byte) (tasks, error) {
-
-	extensions := parser.CommonExtensions | parser.AutoHeadingIDs
-	p := parser.NewWithExtensions(extensions)
-	node := p.Parse(b)
-	return tasks{node: node}, nil
 }
 
 func loadRecurring() (tasks, error) {
@@ -223,7 +87,31 @@ func archiveToday() error {
 }
 
 func filterDone(nodes []ast.Node) []ast.Node {
+	//return nodes
+
+	filtered := []ast.Node{}
+
+	f := func(node ast.Node, entering bool) ast.WalkStatus {
+		if entering {
+			switch t := node.(type) {
+			case *ast.ListItem:
+				//fmt.Printf("list item content: %s. %+v\n", t.Content, t)
+			case *ast.Text:
+				fmt.Printf("node: %T>%T>%T\n", node.GetParent().GetParent(), node.GetParent(), node)
+				if !strings.Contains(string(t.Content), "[x]") {
+					fmt.Printf("doesnt contain: %s\n", t.Content)
+					filtered = append(filtered, t.GetParent().GetParent())
+				}
+				//t.GetParent().GetParent().SetChildren()
+			}
+		}
+		return ast.GoToNext
+	}
+	for _, node := range nodes {
+		ast.Walk(node, ast.NodeVisitorFunc(f))
+	}
 	return nodes
+
 }
 
 func newToday(current tasks, recurring tasks, old tasks) error {
@@ -231,8 +119,10 @@ func newToday(current tasks, recurring tasks, old tasks) error {
 	if err != nil {
 		return err
 	}
+	breakNode(current.node)
 	headingNode(current.node, 2, "Inbox")
 
+	breakNode(current.node)
 	headingNode(current.node, 2, "Rolled Over")
 
 	i := old.ByHeader("Inbox")
@@ -251,6 +141,7 @@ func newToday(current tasks, recurring tasks, old tasks) error {
 	}
 	current.node.SetChildren(append(current.node.GetChildren(), i...))
 
+	breakNode(current.node)
 	headingNode(current.node, 2, "Daily")
 	// get recurring events
 	t := recurring.ByHeader("Daily")
@@ -270,7 +161,7 @@ func newRecurring(recurring tasks) error {
 	return newFile(f, recurring)
 }
 
-func newFile(f string, t tasks) error {
+func newFile(filename string, t tasks) error {
 	d, err := getBaseDir()
 	if err != nil {
 		return err
@@ -279,7 +170,7 @@ func newFile(f string, t tasks) error {
 	if err != nil {
 		return err
 	}
-	fh, err := os.Create(f)
+	fh, err := os.Create(filename)
 	if err != nil {
 		return err
 	}
@@ -288,6 +179,19 @@ func newFile(f string, t tasks) error {
 		return err
 	}
 	return fh.Close()
+}
+
+func breakNode(parent ast.Node) ast.Node {
+	h := &ast.Paragraph{Container: ast.Container{Parent: parent}}
+	textNode := &ast.Text{
+		Leaf: ast.Leaf{
+			Content: []byte("\n"),
+			Literal: []byte("\n"),
+		},
+	}
+	h.SetChildren([]ast.Node{textNode})
+	parent.SetChildren(append(parent.GetChildren(), h))
+	return h
 }
 
 func headingNode(parent ast.Node, level int, text string) ast.Node {
@@ -305,7 +209,7 @@ func headingNode(parent ast.Node, level int, text string) ast.Node {
 
 func todayNode(parent ast.Node) ast.Node {
 	t := time.Now()
-	return headingNode(parent, 1, fmt.Sprintf("%s", t.Format("2006-01-02, Mon")))
+	return headingNode(parent, 1, fmt.Sprintf("%s", t.Format("2006-01-02, Monday")))
 }
 
 func rollover(args []string) error {

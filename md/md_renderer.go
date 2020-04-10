@@ -67,11 +67,9 @@ func (r *Renderer) list(w io.Writer, node *ast.List, entering bool) {
 }
 
 func (r *Renderer) heading(w io.Writer, node *ast.Heading, entering bool) {
-	level := node.Level
-
 	if entering {
 		//if level >= 3 {
-		r.outs(w, strings.Repeat("#", level))
+		r.outs(w, strings.Repeat("#", node.Level))
 		r.outs(w, " ")
 		//}
 	} else {
@@ -96,21 +94,18 @@ func (r *Renderer) listItem(w io.Writer, node *ast.ListItem, entering bool) {
 
 	if entering {
 		if flags&ast.ListTypeOrdered != 0 {
-			fmt.Fprintf(w, "%d.", r.orderedListCounter[r.listDepth])
-			//indentwriter.New(w, 1).Write(text)
-			fmt.Fprintf(w, "%s", text)
+			fmt.Fprintf(w, "%d. %s", r.orderedListCounter[r.listDepth], text)
 			r.orderedListCounter[r.listDepth]++
 		} else {
-			r.outs(w, "-")
+			//r.outs(w, "-")
 			//indentwriter.New(w, 1).Write(text)
-			fmt.Fprintf(w, "%s", text)
+			fmt.Fprintf(w, "- %s", text)
 		}
-		if false && !node.Tight {
-			r.outs(w, "\n")
-		}
+	} else {
 		if r.paragraph[r.listDepth] {
 			if flags&ast.ListItemEndOfList == 0 {
-				r.outs(w, "\n")
+				// TODO why this prints each line as end of list?!
+				//r.outs(w, "\n")
 			}
 			r.paragraph[r.listDepth] = false
 		}
