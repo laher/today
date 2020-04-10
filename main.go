@@ -86,6 +86,18 @@ func archiveToday() error {
 	return nil
 }
 
+var doneMarkers = []string{"[x]", "[X]", "[C]", "[c]"} // x = done, c = cancelled
+
+func isDone(content string) bool {
+	for _, d := range doneMarkers {
+		if strings.Contains(content, d) {
+			return true
+		}
+	}
+	return false
+}
+
+// 2 passes - first to find, second to remove
 func filterDone(nodes []ast.Node) []ast.Node {
 	//return nodes
 
@@ -97,9 +109,9 @@ func filterDone(nodes []ast.Node) []ast.Node {
 			case *ast.ListItem:
 				//fmt.Printf("list item content: %s. %+v\n", t.Content, t)
 			case *ast.Text:
-				fmt.Printf("node: %T>%T>%T\n", node.GetParent().GetParent(), node.GetParent(), node)
-				if !strings.Contains(string(t.Content), "[x]") {
-					fmt.Printf("doesnt contain: %s\n", t.Content)
+				//fmt.Printf("node: %T>%T>%T\n", node.GetParent().GetParent(), node.GetParent(), node)
+				if isDone(string(t.Literal)) {
+					//fmt.Printf("doesnt contain: %s\n", t.Content)
 					filtered = append(filtered, t.GetParent().GetParent())
 				}
 				//t.GetParent().GetParent().SetChildren()
@@ -110,6 +122,22 @@ func filterDone(nodes []ast.Node) []ast.Node {
 	for _, node := range nodes {
 		ast.Walk(node, ast.NodeVisitorFunc(f))
 	}
+	fmt.Printf("should be filtered: %d\n", len(filtered))
+	fCount := 0
+	for _, f := range filtered {
+		fmt.Printf("filtered node: %T: %#v\n", f, f)
+		p := f.GetParent()
+		filteredChildren := []ast.Node{}
+		for _, ch := range p.GetChildren() {
+			if ch != f {
+				filteredChildren = append(filteredChildren, ch)
+			} else {
+				fCount++
+			}
+		}
+		p.SetChildren(filteredChildren)
+	}
+	fmt.Printf("filtered: %d/%d\n", fCount, len(filtered))
 	return nodes
 
 }
