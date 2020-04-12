@@ -15,6 +15,32 @@ func (t tasks) Tasks() []task {
 	return []task{}
 }
 
+func (t tasks) GetFirstHeadingText() string {
+	var (
+		state = 0
+		ret   = ""
+	)
+
+	f := func(node ast.Node, entering bool) ast.WalkStatus {
+		switch h := node.(type) {
+		case *ast.Heading:
+			if state == 0 {
+				state = 1
+			} else {
+				state = 2
+			}
+		case *ast.Text:
+			if state == 1 {
+				ret = string(h.Literal)
+				return ast.Terminate
+			}
+		}
+		return ast.GoToNext
+	}
+	ast.Walk(t.node, ast.NodeVisitorFunc(f))
+	return ret
+}
+
 func (t tasks) ByHeader(s string) []ast.Node {
 	tasks := []ast.Node{}
 	inLevel := -1

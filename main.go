@@ -14,13 +14,26 @@ import (
 	"github.com/laher/today/md"
 )
 
+const (
+	usage = `today
+Usage:
+	today init     - initialise todo directory with today.md (and recurring.md)	
+	today rollover - archive the current file and archive completed/cancelled tasks 
+	today days     - list a few days (for fzf inputs) 
+`
+)
+
 func main() {
 	args := os.Args[1:]
 	if len(args) < 1 {
 		fmt.Fprintln(os.Stderr, "Please specify a subcommand")
+		fmt.Fprintln(os.Stderr, usage)
 		os.Exit(1)
 	}
-	var err error
+	var (
+		err        error
+		printUsage = false
+	)
 	switch args[0] {
 	case "init":
 		err = initialise(args)
@@ -30,9 +43,13 @@ func main() {
 		err = days(args)
 	default:
 		err = errors.New("Unrecognised subcommand")
+		printUsage = true
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error handling [%s]: %v\n", args[0], err)
+		if printUsage {
+			fmt.Fprintln(os.Stderr, usage)
+		}
 		os.Exit(1)
 	}
 }
@@ -54,12 +71,40 @@ func loadRecurring() (tasks, error) {
 }
 
 func archiveToday() error {
-	// can be off by a day, occasionally
-	fa, err := getArchiveFilename(time.Now().Add(-time.Hour * 24))
+
+	ft, err := getTodayFilename()
 	if err != nil {
 		return err
 	}
-	ft, err := getTodayFilename()
+
+	input, err := ioutil.ReadFile(ft)
+	if err != nil {
+		return err
+	}
+	tasks, err := parse(input)
+	if err != nil {
+		return err
+	}
+	h := tasks.GetFirstHeadingText()
+	var fa string
+	var archiveTime time.Time
+	if h != "" {
+		if len(h) > 10 {
+			h = h[:10]
+		}
+		t, err := time.Parse("2006-01-02", h)
+		if err != nil {
+			return err
+		}
+		archiveTime = t
+	}
+	if archiveTime.IsZero() {
+		// nope - use current day - 1
+		// can be off by a day, occasionally
+		archiveTime = time.Now().Add(-time.Hour * 24)
+	}
+
+	fa, err = getArchiveFilename(archiveTime)
 	if err != nil {
 		return err
 	}
@@ -67,10 +112,7 @@ func archiveToday() error {
 	if err = os.MkdirAll(d, 0755); err != nil {
 		return err
 	}
-	input, err := ioutil.ReadFile(ft)
-	if err != nil {
-		return err
-	}
+
 	// TODO check if file exists. If so, change the name of this one
 	// In the meantime, just append
 	f, err := os.OpenFile(fa, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
@@ -209,37 +251,6 @@ func newFile(filename string, t tasks) error {
 	return fh.Close()
 }
 
-func breakNode(parent ast.Node) ast.Node {
-	h := &ast.Paragraph{Container: ast.Container{Parent: parent}}
-	textNode := &ast.Text{
-		Leaf: ast.Leaf{
-			Content: []byte("\n"),
-			Literal: []byte("\n"),
-		},
-	}
-	h.SetChildren([]ast.Node{textNode})
-	parent.SetChildren(append(parent.GetChildren(), h))
-	return h
-}
-
-func headingNode(parent ast.Node, level int, text string) ast.Node {
-	h := &ast.Heading{Level: level, Container: ast.Container{Parent: parent}}
-	textNode := &ast.Text{
-		Leaf: ast.Leaf{
-			Content: []byte(text + "\n"),
-			Literal: []byte(text + "\n"),
-		},
-	}
-	h.SetChildren([]ast.Node{textNode})
-	parent.SetChildren(append(parent.GetChildren(), h))
-	return h
-}
-
-func todayNode(parent ast.Node) ast.Node {
-	t := time.Now()
-	return headingNode(parent, 1, fmt.Sprintf("%s", t.Format("2006-01-02, Monday")))
-}
-
 func rollover(args []string) error {
 	if err := archiveToday(); err != nil {
 		return err
@@ -317,6 +328,11 @@ func initialise(args []string) error {
 func days(args []string) error {
 	// print some days
 	for i := 0; i < 5; i++ {
+		if i == 0 {
+			fmt.Print("Today, ")
+		} else if i == 1 {
+			fmt.Print("Tomorrow, ")
+		}
 		fmt.Println(time.Now().Add(time.Duration(i) * time.Hour * 24).Format("2006-01-02, Mon"))
 	}
 	return nil
