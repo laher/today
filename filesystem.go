@@ -6,12 +6,18 @@ import (
 	"time"
 )
 
+const (
+	todayDir      = "today"
+	todayBase     = "today.md"
+	recurringBase = "recurring.md"
+)
+
 func getBaseDir() (string, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(homeDir, "today"), nil
+	return filepath.Join(homeDir, todayDir), nil
 }
 
 func getTodayFilename() (string, error) {
@@ -19,7 +25,7 @@ func getTodayFilename() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(base, "today.md"), nil
+	return filepath.Join(base, todayBase), nil
 }
 
 func getRecurringFilename() (string, error) {
@@ -27,7 +33,7 @@ func getRecurringFilename() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(base, "recurring.today.md"), nil
+	return filepath.Join(base, recurringBase), nil
 }
 
 func getArchiveFilename(forTime time.Time) (string, error) {

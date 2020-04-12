@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -37,6 +38,8 @@ func main() {
 	switch args[0] {
 	case "init":
 		err = initialise(args)
+	case "config":
+		err = printConfig(args)
 	case "rollover":
 		err = rollover(args)
 	case "days":
@@ -52,6 +55,19 @@ func main() {
 		}
 		os.Exit(1)
 	}
+}
+
+func printConfig(args []string) error {
+	baseDir, err := getBaseDir()
+	if err != nil {
+		return err
+	}
+	c, err := json.Marshal(map[string]string{"base": baseDir, "today": filepath.Join(baseDir, todayBase), "recurring": filepath.Join(baseDir, recurringBase)})
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(os.Stdout, string(c))
+	return nil
 }
 
 func loadToday() (tasks, error) {
