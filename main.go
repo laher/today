@@ -44,6 +44,8 @@ func main() {
 		err = rollover(args)
 	case "days":
 		err = days(args)
+	case "headings":
+		err = printHeadings(args)
 	default:
 		err = errors.New("Unrecognised subcommand")
 		printUsage = true
@@ -287,6 +289,42 @@ func rollover(args []string) error {
 		return err
 	}
 	return newToday(today, recurring, old)
+}
+
+func printHeadings(args []string) error {
+	file := ""
+	if len(args) > 1 {
+		file = args[1]
+	} else {
+		var err error
+		file, err = getTodayFilename()
+		if err != nil {
+			return err
+		}
+	}
+	a, err :=parseFile(file)
+	if err != nil {
+		return err
+	}
+	f := func(node ast.Node, entering bool) ast.WalkStatus {
+		if entering {
+			switch t := node.(type) {
+			case *ast.Text:
+				switch h := node.GetParent().(type) {
+				case *ast.Heading:
+					text := ""
+					for i:=0 ; i<h.Level;i++ {
+						text += "#"
+					}
+					text += " " + string(t.Literal)
+					fmt.Println(text)
+				}
+			}
+		}
+		return ast.GoToNext
+	}
+	ast.Walk(a.node,ast.NodeVisitorFunc(f))
+	return nil
 }
 
 const (
