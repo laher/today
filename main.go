@@ -24,6 +24,11 @@ Usage:
 `
 )
 
+var (
+	doneMarkers = []string{"[x]", "[X]", "[C]", "[c]"}
+	statuses    = map[string]string{" ": "Todo", "i": "In progress", "x": "Done", "p": "Postponed", "c": "Cancelled"}
+)
+
 func main() {
 	args := os.Args[1:]
 	if len(args) < 1 {
@@ -46,6 +51,8 @@ func main() {
 		err = days(args)
 	case "headings":
 		err = printHeadings(args)
+	case "statuses":
+		err = printStatuses(args)
 	default:
 		err = errors.New("Unrecognised subcommand")
 		printUsage = true
@@ -64,7 +71,7 @@ func printConfig(args []string) error {
 	if err != nil {
 		return err
 	}
-	c, err := json.Marshal(map[string]string{"base": baseDir, "today": filepath.Join(baseDir, todayBase), "recurring": filepath.Join(baseDir, recurringBase)})
+	c, err := json.Marshal(map[string]interface{}{"base": baseDir, "today": filepath.Join(baseDir, todayBase), "recurring": filepath.Join(baseDir, recurringBase), "states": statuses})
 	if err != nil {
 		return err
 	}
@@ -145,8 +152,6 @@ func archiveToday() error {
 	}
 	return nil
 }
-
-var doneMarkers = []string{"[x]", "[X]", "[C]", "[c]"} // x = done, c = cancelled
 
 func isDone(content string) bool {
 	for _, d := range doneMarkers {
@@ -291,6 +296,13 @@ func rollover(args []string) error {
 	return newToday(today, recurring, old)
 }
 
+func printStatuses(args []string) error {
+	for s, d := range statuses {
+		fmt.Println(s, d)
+	}
+	return nil
+}
+
 func printHeadings(args []string) error {
 	file := ""
 	if len(args) > 1 {
@@ -302,7 +314,7 @@ func printHeadings(args []string) error {
 			return err
 		}
 	}
-	a, err :=parseFile(file)
+	a, err := parseFile(file)
 	if err != nil {
 		return err
 	}
@@ -313,7 +325,7 @@ func printHeadings(args []string) error {
 				switch h := node.GetParent().(type) {
 				case *ast.Heading:
 					text := ""
-					for i:=0 ; i<h.Level;i++ {
+					for i := 0; i < h.Level; i++ {
 						text += "#"
 					}
 					text += " " + string(t.Literal)
@@ -323,7 +335,7 @@ func printHeadings(args []string) error {
 		}
 		return ast.GoToNext
 	}
-	ast.Walk(a.node,ast.NodeVisitorFunc(f))
+	ast.Walk(a.node, ast.NodeVisitorFunc(f))
 	return nil
 }
 
