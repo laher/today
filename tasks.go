@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log"
 	"strings"
 
 	"github.com/russross/blackfriday/v2"
@@ -42,58 +43,65 @@ func (t tasks) GetFirstHeadingText() string {
 }
 
 func (t tasks) ByHeader(s string) []*blackfriday.Node {
-	tasks := []*blackfriday.Node{}
-	inLevel := -1
-	f := func(node *blackfriday.Node, entering bool) blackfriday.WalkStatus {
-		switch node.Type {
-		case blackfriday.Document: // ignore
-		case blackfriday.List:
-			if entering {
-				if inLevel > -1 {
-					tasks = append(tasks, node)
+	var candidates = []*blackfriday.Node{}
+	inLevel := -1 // grab everything
+	for topLevelNode := t.node.FirstChild; topLevelNode != nil; topLevelNode = topLevelNode.Next {
+		if inLevel == -1 {
+			if topLevelNode.Type == blackfriday.Heading {
+
+				for child := topLevelNode.FirstChild; child != nil; child = child.Next {
+					if strings.Contains(string(child.Literal), s) {
+						inLevel = topLevelNode.Level
+						log.Printf("Found %s (%s)", s, child.Literal)
+					}
 				}
 			}
-		case blackfriday.Heading:
-			if entering {
-				//fmt.Printf("Heading, l %d: '%s'\n", h.Level, h.Content)
-				if inLevel > -1 { // reset
+		} else {
+			if topLevelNode.Type == blackfriday.Heading {
+				if topLevelNode.Level >= inLevel {
+					break
+				}
+			}
+			candidates = append(candidates, topLevelNode)
+		}
+	}
+	/*
+		f := func(node *blackfriday.Node, entering bool) blackfriday.WalkStatus {
+			switch node.Type {
+			case blackfriday.Document: // ignore
+			case blackfriday.Heading:
+				if entering {
+					//fmt.Printf("Heading, l %d: '%s'\n", h.Level, h.Content)
+					if inLevel > -1 { // reset
+						if node.Level <= inLevel {
+							inLevel = -1
+						}
+					}
+					for child := node.FirstChild; child != nil; child = child.Next {
+						if strings.Contains(string(child.Literal), s) {
+							firstChild = child
+							return blackfriday.Terminate
+						}
+					}
+					//fmt.Printf("Heading children: %d, %d\n", len(h.Children), len(node.GetChildren()))
+				} else {
 					if node.Level <= inLevel {
 						inLevel = -1
 					}
 				}
-				//fmt.Printf("Heading children: %d, %d\n", len(h.Children), len(node.GetChildren()))
-			} else {
-				if node.Level == inLevel {
-					//inLevel = -1
+			default:
+				if entering {
+					//fmt.Printf("*** Other Type ***: %T, full: %#v\n", node, node)
 				}
 			}
-		case blackfriday.Text:
-			//fmt.Printf("literal: %v, leaf: %#v\n", string(node.AsLeaf().Literal), node.AsLeaf())
-			if node.Parent.Type == blackfriday.Heading {
-				if strings.Contains(string(node.Literal), s) {
-					inLevel = node.Level
-					//tasks = append(tasks, node)
-				}
+			if inLevel > -1 {
+				//			if node.AsContainer() != nil {
+				//				fmt.Printf("inLevel %d, type: %T, content: %s\n", inLevel, node, node.AsContainer().Content)
+				//			}
 			}
-		case blackfriday.Item:
-			if entering {
-				if inLevel > -1 {
-					//fmt.Printf("Including List item: %v, inLevel: %v, container: %#v\n", string(node.AsContainer().Content), inLevel, node.AsContainer())
-					//		tasks = append(tasks, node)
-				}
-			}
-		default:
-			if entering {
-				//fmt.Printf("*** Other Type ***: %T, full: %#v\n", node, node)
-			}
+			return blackfriday.GoToNext
 		}
-		if inLevel > -1 {
-			//			if node.AsContainer() != nil {
-			//				fmt.Printf("inLevel %d, type: %T, content: %s\n", inLevel, node, node.AsContainer().Content)
-			//			}
-		}
-		return blackfriday.GoToNext
-	}
-	t.node.Walk(blackfriday.NodeVisitor(f))
-	return tasks
+		t.node.Walk(f)
+	*/
+	return candidates
 }

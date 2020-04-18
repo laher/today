@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,8 +20,11 @@ const (
 	usage = `today
 Usage:
 	today init     - initialise todo directory with today.md (and recurring.md)	
+	today config   - print config variables 
 	today rollover - archive the current file and archive completed/cancelled tasks 
 	today days     - list a few days (for fzf inputs) 
+	today headings - list the headings in a file
+	today statuses - list the statuses
 `
 )
 
@@ -46,6 +51,8 @@ func main() {
 		err = printConfig(args)
 	case "rollover":
 		err = rollover(args)
+	case "rollover-dryrun":
+		err = rolloverDryRun(args)
 	case "days":
 		err = days(args)
 	case "headings":
@@ -164,47 +171,50 @@ func isDone(content string) bool {
 // 2 passes - first to find, second to remove
 func filterDone(nodes []*blackfriday.Node) []*blackfriday.Node {
 	//return nodes
+	nodesToUnlink := []*blackfriday.Node{}
 
-	filtered := []*blackfriday.Node{}
-
-	f := func(node *blackfriday.Node, entering bool) blackfriday.WalkStatus {
-		if entering {
-			switch node.Type {
-			case blackfriday.Item:
-				//fmt.Printf("list item content: %s. %+v\n", t.Content, t)
-			case blackfriday.Text:
-				//fmt.Printf("node: %T>%T>%T\n", node.GetParent().GetParent(), node.GetParent(), node)
-				if isDone(string(node.Literal)) {
-
-					//fmt.Printf("doesnt contain: %s\n", t.Content)
-					filtered = append(filtered, node.Parent.Parent)
-				}
-				//t.GetParent().GetParent().SetChildren()
-			}
-		}
-		return blackfriday.GoToNext
-	}
 	for _, node := range nodes {
-		node.Walk(blackfriday.NodeVisitor(f))
-	}
-	fmt.Printf("should be filtered: %d\n", len(filtered))
-	fCount := 0
-	for _, f := range filtered {
-		fmt.Printf("filtered node: %T: %#v\n", f, f)
-		p := f.Parent
-		filteredChildren := []*blackfriday.Node{}
-		for ch := p.FirstChild; ch != nil; ch = ch.Next {
-			//for _, ch := range p.GetChildren() {
-			if ch != f {
-				filteredChildren = append(filteredChildren, ch)
-			} else {
-				fCount++
+		node.Walk(func(node *blackfriday.Node, entering bool) blackfriday.WalkStatus {
+			if entering {
+				switch node.Type {
+				case blackfriday.Item:
+					if node.FirstChild != nil {
+						c := node.FirstChild
+						log.Printf("found c: %s", string(c.Literal))
+						t := node.FirstChild.FirstChild
+						if t != nil {
+							log.Printf("found c.c: %s", string(t.Literal))
+							if isDone(string(t.Literal)) {
+								log.Printf("c.c is done: %s", string(t.Literal))
+								nodesToUnlink = append(nodesToUnlink, node)
+								return blackfriday.SkipChildren
+							}
+						}
+					}
+					//fmt.Printf("list item content: %s. %+v\n", t.Content, t)
+					/*
+						case blackfriday.Text:
+							// just direct children of items
+							if node.Parent.Parent.Type == blackfriday.Item {
+								fmt.Printf("node: %v>%v>%v\n", node.Parent.Parent.Type, node.Parent.Type, node.Type)
+								if isDone(string(node.Literal)) {
+
+									//fmt.Printf("doesnt contain: %s\n", t.Content)
+									//doneNodes = append(doneNodes, node.Parent.Parent)
+									node.Parent.Parent.Unlink()
+								}
+							}
+							//t.GetParent().GetParent().SetChildren()
+					*/
+				}
 			}
-		}
-		fmt.Printf("TODO filtered nodes")
-		//p.SetChildren(filteredChildren)
+			return blackfriday.GoToNext
+		})
 	}
-	fmt.Printf("filtered: %d/%d\n", fCount, len(filtered))
+	for _, n := range nodesToUnlink {
+		n.Unlink()
+	}
+	//fmt.Printf("filtered: %d\n", len(doneNodes))
 	return nodes
 
 }
@@ -214,41 +224,41 @@ func newToday(current tasks, recurring tasks, old tasks) error {
 	if err != nil {
 		return err
 	}
-	breakNode(current.node)
-	headingNode(current.node, 2, "Inbox")
+	c, err := buildToday(current, recurring, old)
+	return newFile(f, c)
+}
 
-	breakNode(current.node)
+func buildToday(current tasks, recurring tasks, old tasks) (tasks, error) {
+	headingNode(current.node, 2, "Inbox") // empty
+
 	headingNode(current.node, 2, "Rolled Over")
+	//para := paraNode(current.node)
 
-	i := old.ByHeader("Inbox")
-	fmt.Printf("Old inbox: %d nodes\n", len(i))
-	i = filterDone(i)
-	for _, ti := range i {
-		fmt.Printf("TODO filtered nodes: %v", ti)
-		//ti.SetParent(current.node)
+	unfiltered := old.ByHeader("Inbox")
+	filtered := filterDone(unfiltered)
+	log.Printf("unfiltered/filtered: %d/%d", len(unfiltered), len(filtered))
+	for _, f := range filtered {
+		current.node.AppendChild(f)
 	}
 	//current.node.SetChildren(append(current.node.GetChildren(), i...))
 
-	i = old.ByHeader("Rolled Over")
-	fmt.Printf("Old Rolled over: %d nodes\n", len(i))
-	i = filterDone(i)
-	for _, ti := range i {
-		fmt.Printf("TODO filtered nodes: %v", ti)
-		//ti.SetParent(current.node)
+	unfiltered = old.ByHeader("Rolled Over")
+	filtered = filterDone(unfiltered)
+	log.Printf("unfiltered/filtered: %d/%d", len(unfiltered), len(filtered))
+	for _, f := range filtered {
+		current.node.AppendChild(f)
 	}
 	//current.node.SetChildren(append(current.node.GetChildren(), i...))
 
-	breakNode(current.node)
 	headingNode(current.node, 2, "Daily")
 	// get recurring events
-	t := recurring.ByHeader("Daily")
-	fmt.Printf("Daily: %d nodes\n", len(t))
-	for _, ti := range t {
-		fmt.Printf("TODO filtered nodes: %v", ti)
-		//ti.SetParent(current.node)
+	d := recurring.ByHeader("Daily")
+	log.Printf("daily: %d", len(d))
+	for _, n := range d {
+		current.node.AppendChild(n)
 	}
 	//current.node.SetChildren(append(current.node.GetChildren(), t...))
-	return newFile(f, current)
+	return current, nil
 }
 
 func newRecurring(recurring tasks) error {
@@ -280,6 +290,52 @@ func newFile(filename string, t tasks) error {
 	//	return err
 	//}
 	return fh.Close()
+}
+
+func rolloverDryRun(args []string) error {
+	// new today
+	doc := blackfriday.NewNode(blackfriday.Document)
+	today := tasks{node: doc}
+	todayNode(today.node)
+
+	// load today
+	old, err := loadToday()
+	if err != nil {
+		return err
+	}
+	fmt.Println("Before:")
+	//printAST(os.Stdout, old.node)
+	if false {
+		return nil
+	}
+	r := markdown.NewRenderer(&markdown.Options{Terminal: false, HeadersAlwaysHashes: true})
+	render(r, os.Stdout, old.node)
+
+	// load recurring
+	recurring, err := loadRecurring()
+	if err != nil {
+		return err
+	}
+	c, err := buildToday(today, recurring, old)
+	if err != nil {
+		return err
+
+	}
+	_ = c
+	_ = r
+
+	fmt.Println("\nAfter:")
+	//printAST(os.Stdout, c.node)
+	render(r, os.Stdout, c.node)
+	return nil
+}
+
+func render(r blackfriday.Renderer, w io.Writer, ast *blackfriday.Node) {
+	r.RenderHeader(w, ast)
+	ast.Walk(func(node *blackfriday.Node, entering bool) blackfriday.WalkStatus {
+		return r.RenderNode(w, node, entering)
+	})
+	r.RenderFooter(w, ast)
 }
 
 func rollover(args []string) error {

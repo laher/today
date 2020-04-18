@@ -16,8 +16,18 @@ func parseFile(file string) (tasks, error) {
 
 func parse(b []byte) (tasks, error) {
 	//extensions := parser.CommonExtensions | parser.AutoHeadingIDs
+
 	//p := parser.NewWithExtensions(extensions)
-	md := blackfriday.New()
+
+	const extensions = blackfriday.NoIntraEmphasis |
+		blackfriday.Tables |
+		blackfriday.FencedCode |
+		blackfriday.Autolink |
+		blackfriday.Strikethrough |
+		blackfriday.SpaceHeadings |
+		blackfriday.NoEmptyLineBeforeBlock
+	md := blackfriday.New(blackfriday.WithExtensions(extensions), blackfriday.WithExtensions(blackfriday.CommonExtensions))
+
 	node := md.Parse(b)
 	return tasks{node: node}, nil
 }
