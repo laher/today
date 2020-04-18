@@ -225,6 +225,9 @@ func newToday(current tasks, recurring tasks, old tasks) error {
 		return err
 	}
 	c, err := buildToday(current, recurring, old)
+	if err != nil {
+		return err
+	}
 	return newFile(f, c)
 }
 
@@ -282,13 +285,9 @@ func newFile(filename string, t tasks) error {
 	if err != nil {
 		return err
 	}
-	r := markdown.NewRenderer(&markdown.Options{})
-	r.RenderNode(fh, t.node, true)
 
-	//t.node, md.NewRenderer())
-	//if _, err := fh.Write(b); err != nil {
-	//	return err
-	//}
+	r := markdown.NewRenderer(&markdown.Options{Terminal: false, HashHeaders: true})
+	render(r, fh, t.node)
 	return fh.Close()
 }
 
