@@ -308,7 +308,7 @@ func rolloverDryRun(args []string) error {
 	if false {
 		return nil
 	}
-	r := markdown.NewRenderer(&markdown.Options{Terminal: false, HeadersAlwaysHashes: true})
+	r := markdown.NewRenderer(&markdown.Options{Terminal: false, HashHeaders: true})
 	render(r, os.Stdout, old.node)
 
 	// load recurring
