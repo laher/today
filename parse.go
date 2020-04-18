@@ -3,7 +3,7 @@ package main
 import (
 	"io/ioutil"
 
-	"github.com/gomarkdown/markdown/parser"
+	"github.com/russross/blackfriday/v2"
 )
 
 func parseFile(file string) (tasks, error) {
@@ -15,9 +15,9 @@ func parseFile(file string) (tasks, error) {
 }
 
 func parse(b []byte) (tasks, error) {
-
-	extensions := parser.CommonExtensions | parser.AutoHeadingIDs
-	p := parser.NewWithExtensions(extensions)
-	node := p.Parse(b)
+	//extensions := parser.CommonExtensions | parser.AutoHeadingIDs
+	//p := parser.NewWithExtensions(extensions)
+	md := blackfriday.New()
+	node := md.Parse(b)
 	return tasks{node: node}, nil
 }

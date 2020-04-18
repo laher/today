@@ -3,11 +3,11 @@ package main
 import (
 	"strings"
 
-	"github.com/gomarkdown/markdown/ast"
+	"github.com/russross/blackfriday/v2"
 )
 
 type tasks struct {
-	node ast.Node
+	node *blackfriday.Node
 }
 
 func (t tasks) Tasks() []task {
@@ -21,61 +21,61 @@ func (t tasks) GetFirstHeadingText() string {
 		ret   = ""
 	)
 
-	f := func(node ast.Node, entering bool) ast.WalkStatus {
-		switch h := node.(type) {
-		case *ast.Heading:
+	f := func(node *blackfriday.Node, entering bool) blackfriday.WalkStatus {
+		switch node.Type {
+		case blackfriday.Heading:
 			if state == 0 {
 				state = 1
 			} else {
 				state = 2
 			}
-		case *ast.Text:
+		case blackfriday.Text:
 			if state == 1 {
-				ret = string(h.Literal)
-				return ast.Terminate
+				ret = string(node.Literal)
+				return blackfriday.Terminate
 			}
 		}
-		return ast.GoToNext
+		return blackfriday.GoToNext
 	}
-	ast.Walk(t.node, ast.NodeVisitorFunc(f))
+	t.node.Walk(blackfriday.NodeVisitor(f))
 	return ret
 }
 
-func (t tasks) ByHeader(s string) []ast.Node {
-	tasks := []ast.Node{}
+func (t tasks) ByHeader(s string) []*blackfriday.Node {
+	tasks := []*blackfriday.Node{}
 	inLevel := -1
-	f := func(node ast.Node, entering bool) ast.WalkStatus {
-		switch h := node.(type) {
-		case *ast.Document: // ignore
-		case *ast.List:
+	f := func(node *blackfriday.Node, entering bool) blackfriday.WalkStatus {
+		switch node.Type {
+		case blackfriday.Document: // ignore
+		case blackfriday.List:
 			if entering {
 				if inLevel > -1 {
 					tasks = append(tasks, node)
 				}
 			}
-		case *ast.Heading:
+		case blackfriday.Heading:
 			if entering {
 				//fmt.Printf("Heading, l %d: '%s'\n", h.Level, h.Content)
 				if inLevel > -1 { // reset
-					if h.Level <= inLevel {
+					if node.Level <= inLevel {
 						inLevel = -1
 					}
 				}
 				//fmt.Printf("Heading children: %d, %d\n", len(h.Children), len(node.GetChildren()))
 			} else {
-				if h.Level == inLevel {
+				if node.Level == inLevel {
 					//inLevel = -1
 				}
 			}
-		case *ast.Text:
+		case blackfriday.Text:
 			//fmt.Printf("literal: %v, leaf: %#v\n", string(node.AsLeaf().Literal), node.AsLeaf())
-			if p, ok := h.Parent.(*ast.Heading); ok {
-				if strings.Contains(string(h.Literal), s) {
-					inLevel = p.Level
+			if node.Parent.Type == blackfriday.Heading {
+				if strings.Contains(string(node.Literal), s) {
+					inLevel = node.Level
 					//tasks = append(tasks, node)
 				}
 			}
-		case *ast.ListItem:
+		case blackfriday.Item:
 			if entering {
 				if inLevel > -1 {
 					//fmt.Printf("Including List item: %v, inLevel: %v, container: %#v\n", string(node.AsContainer().Content), inLevel, node.AsContainer())
@@ -88,12 +88,12 @@ func (t tasks) ByHeader(s string) []ast.Node {
 			}
 		}
 		if inLevel > -1 {
-			if node.AsContainer() != nil {
-				//				fmt.Printf("inLevel %d, type: %T, content: %s\n", inLevel, node, node.AsContainer().Content)
-			}
+			//			if node.AsContainer() != nil {
+			//				fmt.Printf("inLevel %d, type: %T, content: %s\n", inLevel, node, node.AsContainer().Content)
+			//			}
 		}
-		return ast.GoToNext
+		return blackfriday.GoToNext
 	}
-	ast.Walk(t.node, ast.NodeVisitorFunc(f))
+	t.node.Walk(blackfriday.NodeVisitor(f))
 	return tasks
 }

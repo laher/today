@@ -10,9 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gomarkdown/markdown"
-	"github.com/gomarkdown/markdown/ast"
-	"github.com/laher/today/md"
+	"github.com/laher/markdownfmt/markdown"
+	"github.com/russross/blackfriday/v2"
 )
 
 const (
@@ -163,44 +162,47 @@ func isDone(content string) bool {
 }
 
 // 2 passes - first to find, second to remove
-func filterDone(nodes []ast.Node) []ast.Node {
+func filterDone(nodes []*blackfriday.Node) []*blackfriday.Node {
 	//return nodes
 
-	filtered := []ast.Node{}
+	filtered := []*blackfriday.Node{}
 
-	f := func(node ast.Node, entering bool) ast.WalkStatus {
+	f := func(node *blackfriday.Node, entering bool) blackfriday.WalkStatus {
 		if entering {
-			switch t := node.(type) {
-			case *ast.ListItem:
+			switch node.Type {
+			case blackfriday.Item:
 				//fmt.Printf("list item content: %s. %+v\n", t.Content, t)
-			case *ast.Text:
+			case blackfriday.Text:
 				//fmt.Printf("node: %T>%T>%T\n", node.GetParent().GetParent(), node.GetParent(), node)
-				if isDone(string(t.Literal)) {
+				if isDone(string(node.Literal)) {
+
 					//fmt.Printf("doesnt contain: %s\n", t.Content)
-					filtered = append(filtered, t.GetParent().GetParent())
+					filtered = append(filtered, node.Parent.Parent)
 				}
 				//t.GetParent().GetParent().SetChildren()
 			}
 		}
-		return ast.GoToNext
+		return blackfriday.GoToNext
 	}
 	for _, node := range nodes {
-		ast.Walk(node, ast.NodeVisitorFunc(f))
+		node.Walk(blackfriday.NodeVisitor(f))
 	}
 	fmt.Printf("should be filtered: %d\n", len(filtered))
 	fCount := 0
 	for _, f := range filtered {
 		fmt.Printf("filtered node: %T: %#v\n", f, f)
-		p := f.GetParent()
-		filteredChildren := []ast.Node{}
-		for _, ch := range p.GetChildren() {
+		p := f.Parent
+		filteredChildren := []*blackfriday.Node{}
+		for ch := p.FirstChild; ch != nil; ch = ch.Next {
+			//for _, ch := range p.GetChildren() {
 			if ch != f {
 				filteredChildren = append(filteredChildren, ch)
 			} else {
 				fCount++
 			}
 		}
-		p.SetChildren(filteredChildren)
+		fmt.Printf("TODO filtered nodes")
+		//p.SetChildren(filteredChildren)
 	}
 	fmt.Printf("filtered: %d/%d\n", fCount, len(filtered))
 	return nodes
@@ -222,17 +224,19 @@ func newToday(current tasks, recurring tasks, old tasks) error {
 	fmt.Printf("Old inbox: %d nodes\n", len(i))
 	i = filterDone(i)
 	for _, ti := range i {
-		ti.SetParent(current.node)
+		fmt.Printf("TODO filtered nodes: %v", ti)
+		//ti.SetParent(current.node)
 	}
-	current.node.SetChildren(append(current.node.GetChildren(), i...))
+	//current.node.SetChildren(append(current.node.GetChildren(), i...))
 
 	i = old.ByHeader("Rolled Over")
 	fmt.Printf("Old Rolled over: %d nodes\n", len(i))
 	i = filterDone(i)
 	for _, ti := range i {
-		ti.SetParent(current.node)
+		fmt.Printf("TODO filtered nodes: %v", ti)
+		//ti.SetParent(current.node)
 	}
-	current.node.SetChildren(append(current.node.GetChildren(), i...))
+	//current.node.SetChildren(append(current.node.GetChildren(), i...))
 
 	breakNode(current.node)
 	headingNode(current.node, 2, "Daily")
@@ -240,9 +244,10 @@ func newToday(current tasks, recurring tasks, old tasks) error {
 	t := recurring.ByHeader("Daily")
 	fmt.Printf("Daily: %d nodes\n", len(t))
 	for _, ti := range t {
-		ti.SetParent(current.node)
+		fmt.Printf("TODO filtered nodes: %v", ti)
+		//ti.SetParent(current.node)
 	}
-	current.node.SetChildren(append(current.node.GetChildren(), t...))
+	//current.node.SetChildren(append(current.node.GetChildren(), t...))
 	return newFile(f, current)
 }
 
@@ -267,10 +272,13 @@ func newFile(filename string, t tasks) error {
 	if err != nil {
 		return err
 	}
-	b := markdown.Render(t.node, md.NewRenderer())
-	if _, err := fh.Write(b); err != nil {
-		return err
-	}
+	r := markdown.NewRenderer(&markdown.Options{})
+	r.RenderNode(fh, t.node, true)
+
+	//t.node, md.NewRenderer())
+	//if _, err := fh.Write(b); err != nil {
+	//	return err
+	//}
 	return fh.Close()
 }
 
@@ -280,7 +288,8 @@ func rollover(args []string) error {
 	}
 
 	// new today
-	today := tasks{node: &ast.Document{}}
+	doc := blackfriday.NewNode(blackfriday.Document)
+	today := tasks{node: doc}
 	todayNode(today.node)
 
 	// load today
@@ -318,24 +327,24 @@ func printHeadings(args []string) error {
 	if err != nil {
 		return err
 	}
-	f := func(node ast.Node, entering bool) ast.WalkStatus {
+	f := func(node *blackfriday.Node, entering bool) blackfriday.WalkStatus {
 		if entering {
-			switch t := node.(type) {
-			case *ast.Text:
-				switch h := node.GetParent().(type) {
-				case *ast.Heading:
+			switch node.Type {
+			case blackfriday.Text:
+				switch node.Parent.Type {
+				case blackfriday.Heading:
 					text := ""
-					for i := 0; i < h.Level; i++ {
+					for i := 0; i < node.Level; i++ {
 						text += "#"
 					}
-					text += " " + string(t.Literal)
+					text += " " + string(node.Literal)
 					fmt.Println(text)
 				}
 			}
 		}
-		return ast.GoToNext
+		return blackfriday.GoToNext
 	}
-	ast.Walk(a.node, ast.NodeVisitorFunc(f))
+	a.node.Walk(blackfriday.NodeVisitor(f))
 	return nil
 }
 
@@ -358,17 +367,17 @@ func initialise(args []string) error {
 		recurringExists = true
 	}
 
-	today := tasks{node: &ast.Document{}}
+	doc := blackfriday.NewNode(blackfriday.Document)
+	today := tasks{node: doc}
 	todayNode(today.node)
 
-	recurring := tasks{node: &ast.Document{}}
+	doc = blackfriday.NewNode(blackfriday.Document)
+	recurring := tasks{node: doc}
 	if !recurringExists || forceNewRecurring {
-		children := recurring.node.GetChildren()
-		children = append(children, headingNode(recurring.node, 1, "Recurring tasks"))
-		children = append(children, headingNode(recurring.node, 2, "Daily"))
-		children = append(children, headingNode(recurring.node, 2, "Weekly"))
-		children = append(children, headingNode(recurring.node, 2, "Weekdays"))
-		recurring.node.SetChildren(children)
+		recurring.node.AppendChild(headingNode(recurring.node, 1, "Recurring tasks"))
+		recurring.node.AppendChild(headingNode(recurring.node, 2, "Daily"))
+		recurring.node.AppendChild(headingNode(recurring.node, 2, "Weekly"))
+		recurring.node.AppendChild(headingNode(recurring.node, 2, "Weekdays"))
 		err := newRecurring(recurring)
 		if err != nil {
 			return err
@@ -381,7 +390,8 @@ func initialise(args []string) error {
 	}
 
 	if _, err := os.Stat(tf); os.IsNotExist(err) || force {
-		err = newToday(today, recurring, tasks{node: &ast.Document{}}) // nothing rolled over
+		doc := blackfriday.NewNode(blackfriday.Document)
+		err = newToday(today, recurring, tasks{node: doc}) // nothing rolled over
 		if err != nil {
 			return err
 		}
