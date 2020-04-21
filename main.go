@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,7 +20,10 @@ const (
 Usage:
 	today init     - initialise todo directory with today.md (and recurring.md)	
 	today config   - print config variables 
-	today rollover - archive the current file and archive completed/cancelled tasks 
+	today rollover - back up, prune completed/cancelled tasks and reset regular tasks
+	today rollover-dryrun - print rolledover file to stdout
+	today prune    - back up and prune completed/cancelled tasks 
+	today prune-dryrun - print pruned tasks and print to stdout
 	today days     - list a few days (for fzf inputs) 
 	today headings - list the headings in a file
 	today statuses - list the statuses
@@ -50,9 +52,13 @@ func main() {
 	case "config":
 		err = printConfig(args)
 	case "rollover":
-		err = rollover(args)
+		err = prune(args, true, false)
 	case "rollover-dryrun":
-		err = rolloverDryRun(args)
+		err = prune(args, true, true)
+	case "prune":
+		err = prune(args, false, false)
+	case "prune-dryrun":
+		err = prune(args, false, true)
 	case "days":
 		err = days(args)
 	case "headings":
@@ -64,7 +70,7 @@ func main() {
 		printUsage = true
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error handling [%s]: %v\n", args[0], err)
+		fmt.Fprintf(os.Stderr, "[%s]: %v\n", args[0], err)
 		if printUsage {
 			fmt.Fprintln(os.Stderr, usage)
 		}
@@ -101,7 +107,7 @@ func loadRecurring() (tasks, error) {
 	return parseFile(file)
 }
 
-func archiveToday() error {
+func backUpToday() error {
 
 	ft, err := getTodayFilename()
 	if err != nil {
@@ -179,13 +185,13 @@ func filterDone(nodes []*blackfriday.Node) []*blackfriday.Node {
 				switch node.Type {
 				case blackfriday.Item:
 					if node.FirstChild != nil {
-						c := node.FirstChild
-						log.Printf("found c: %s", string(c.Literal))
+						//c := node.FirstChild
+						//log.Printf("found c: %s", string(c.Literal))
 						t := node.FirstChild.FirstChild
 						if t != nil {
-							log.Printf("found c.c: %s", string(t.Literal))
+							//log.Printf("found c.c: %s", string(t.Literal))
 							if isDone(string(t.Literal)) {
-								log.Printf("c.c is done: %s", string(t.Literal))
+								//log.Printf("c.c is done: %s", string(t.Literal))
 								nodesToUnlink = append(nodesToUnlink, node)
 								return blackfriday.SkipChildren
 							}
@@ -219,35 +225,40 @@ func filterDone(nodes []*blackfriday.Node) []*blackfriday.Node {
 
 }
 
-func newToday(current tasks, recurring tasks, old tasks) error {
+func newToday(current tasks, recurring tasks, old tasks, rollInbox bool) error {
 	f, err := getTodayFilename()
 	if err != nil {
 		return err
 	}
-	c, err := buildToday(current, recurring, old)
+	c, err := buildToday(current, recurring, old, rollInbox)
 	if err != nil {
 		return err
 	}
 	return newFile(f, c)
 }
 
-func buildToday(current tasks, recurring tasks, old tasks) (tasks, error) {
+func buildToday(current tasks, recurring tasks, old tasks, rollInbox bool) (tasks, error) {
 	headingNode(current.node, 2, "Inbox") // empty
 
-	headingNode(current.node, 2, "Rolled Over")
-	//para := paraNode(current.node)
-
+	if rollInbox {
+		headingNode(current.node, 2, "Rolled Over")
+		//para := paraNode(current.node)
+	}
 	unfiltered := old.ByHeader("Inbox")
 	filtered := filterDone(unfiltered)
-	log.Printf("unfiltered/filtered: %d/%d", len(unfiltered), len(filtered))
+	//log.Printf("unfiltered/filtered: %d/%d", len(unfiltered), len(filtered))
 	for _, f := range filtered {
 		current.node.AppendChild(f)
 	}
 	//current.node.SetChildren(append(current.node.GetChildren(), i...))
 
+	if !rollInbox {
+		headingNode(current.node, 2, "Rolled Over")
+		//para := paraNode(current.node)
+	}
 	unfiltered = old.ByHeader("Rolled Over")
 	filtered = filterDone(unfiltered)
-	log.Printf("unfiltered/filtered: %d/%d", len(unfiltered), len(filtered))
+	//log.Printf("unfiltered/filtered: %d/%d", len(unfiltered), len(filtered))
 	for _, f := range filtered {
 		current.node.AppendChild(f)
 	}
@@ -256,7 +267,7 @@ func buildToday(current tasks, recurring tasks, old tasks) (tasks, error) {
 	headingNode(current.node, 2, "Daily")
 	// get recurring events
 	d := recurring.ByHeader("Daily")
-	log.Printf("daily: %d", len(d))
+	//log.Printf("daily: %d", len(d))
 	for _, n := range d {
 		current.node.AppendChild(n)
 	}
@@ -291,41 +302,101 @@ func newFile(filename string, t tasks) error {
 	return fh.Close()
 }
 
-func rolloverDryRun(args []string) error {
-	// new today
-	doc := blackfriday.NewNode(blackfriday.Document)
-	today := tasks{node: doc}
-	todayNode(today.node)
+func getDateHeader(t tasks) (time.Time, error) {
+	var d time.Time
+	t.node.Walk(func(node *blackfriday.Node, entering bool) blackfriday.WalkStatus {
+		switch node.Type {
+		case blackfriday.Heading:
+			if node.Level == 1 {
+				// first child is usually TextNode
+				if node.FirstChild == nil || node.FirstChild.Type != blackfriday.Text {
+					// skip: no text node
+					fmt.Printf("skip: first child doesn't match: %v\n", node.FirstChild)
+					return blackfriday.GoToNext
+				}
+				content := string(node.FirstChild.Literal)
+				if len(content) < 10 {
+					// skip: too short
+					fmt.Printf("skip: first child content too short: %v\n", content)
+					return blackfriday.GoToNext
+				}
+				if len(content) > 10 {
+					content = content[0:10]
+				}
+				var err error
+				d, err = time.Parse("2006-01-02", content)
+				if err != nil {
+					// skip
+					fmt.Printf("%s doesn't match: %v\n", content, err)
+					return blackfriday.GoToNext
+				}
+				return blackfriday.Terminate
+			}
+		}
+		return blackfriday.GoToNext
+	})
+	if d.IsZero() {
+		return d, errors.New("Not found")
+	}
+	return d, nil
+}
 
+func prune(args []string, mustRollover bool, dryRun bool) error {
 	// load today
 	old, err := loadToday()
 	if err != nil {
 		return err
 	}
-	fmt.Println("Before:")
-	//printAST(os.Stdout, old.node)
-	if false {
-		return nil
+	d, err := getDateHeader(old)
+	if err != nil {
+		return err
 	}
+	rollInbox := true
+	if time.Now().Format("2006-01-02") == d.Format("2006-01-02") {
+		// don't rollover
+		rollInbox = false
+	}
+	if mustRollover && !rollInbox {
+		return errors.New("same day - no rollover")
+	}
+	if !dryRun {
+		if err := backUpToday(); err != nil {
+			return err
+		}
+	}
+
+	// new today
+	doc := blackfriday.NewNode(blackfriday.Document)
+	today := tasks{node: doc}
+	todayNode(today.node)
+	//fmt.Println("Before:")
+	//printAST(os.Stdout, old.node)
 	r := markdown.NewRenderer(&markdown.Options{Terminal: false, HashHeaders: true})
-	render(r, os.Stdout, old.node)
+	//render(r, os.Stdout, old.node)
 
 	// load recurring
 	recurring, err := loadRecurring()
 	if err != nil {
 		return err
 	}
-	c, err := buildToday(today, recurring, old)
+	c, err := buildToday(today, recurring, old, rollInbox)
 	if err != nil {
 		return err
 
 	}
 	_ = c
 	_ = r
-
-	fmt.Println("\nAfter:")
-	//printAST(os.Stdout, c.node)
-	render(r, os.Stdout, c.node)
+	if dryRun {
+		//fmt.Println("\nAfter:")
+		//printAST(os.Stdout, c.node)
+		render(r, os.Stdout, c.node)
+	} else {
+		f, err := getTodayFilename()
+		if err != nil {
+			return err
+		}
+		return newFile(f, c)
+	}
 	return nil
 }
 
@@ -335,29 +406,6 @@ func render(r blackfriday.Renderer, w io.Writer, ast *blackfriday.Node) {
 		return r.RenderNode(w, node, entering)
 	})
 	r.RenderFooter(w, ast)
-}
-
-func rollover(args []string) error {
-	if err := archiveToday(); err != nil {
-		return err
-	}
-
-	// new today
-	doc := blackfriday.NewNode(blackfriday.Document)
-	today := tasks{node: doc}
-	todayNode(today.node)
-
-	// load today
-	old, err := loadToday()
-	if err != nil {
-		return err
-	}
-	// load recurring
-	recurring, err := loadRecurring()
-	if err != nil {
-		return err
-	}
-	return newToday(today, recurring, old)
 }
 
 func printStatuses(args []string) error {
@@ -446,7 +494,7 @@ func initialise(args []string) error {
 
 	if _, err := os.Stat(tf); os.IsNotExist(err) || force {
 		doc := blackfriday.NewNode(blackfriday.Document)
-		err = newToday(today, recurring, tasks{node: doc}) // nothing rolled over
+		err = newToday(today, recurring, tasks{node: doc}, false) // nothing rolled over
 		if err != nil {
 			return err
 		}

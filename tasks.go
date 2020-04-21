@@ -1,7 +1,6 @@
 package main
 
 import (
-	"log"
 	"strings"
 
 	"github.com/russross/blackfriday/v2"
@@ -52,7 +51,7 @@ func (t tasks) ByHeader(s string) []*blackfriday.Node {
 				for child := topLevelNode.FirstChild; child != nil; child = child.Next {
 					if strings.Contains(string(child.Literal), s) {
 						inLevel = topLevelNode.Level
-						log.Printf("Found %s (%s)", s, child.Literal)
+						//log.Printf("Found %s (%s)", s, child.Literal)
 					}
 				}
 			}
